@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OSCloudSync Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body class="dashboard-body">
+    <div class="dashboard-container">
+        <div class="dashboard-header">
+            <h1><i class="fas fa-cloud-upload-alt"></i> OSCloudSync Dashboard</h1>
+            <a href="/logout" class="logout-button"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        </div>
+
+        <div class="dashboard-content">
+            <div class="card">
+                <i class="fas fa-folder-open card-icon"></i>
+                <h3>Watch Folder</h3>
+                <p>Monitoring: <strong>{{ watch_folder }}</strong></p>
+            </div>
+
+            <div class="card">
+                <i class="fas fa-sync-alt card-icon"></i>
+                <h3>Last Sync</h3>
+                <p>{{ last_sync_time or "Not yet synced" }}</p>
+            </div>
+
+            <div class="card">
+                <i class="fas fa-hdd card-icon"></i>
+                <h3>Storage</h3>
+                <p>{{ storage_status or "Fetching..." }}</p>
+            </div>
+        </div>
+
+        <div class="dashboard-footer">
+            <form action="/sync" method="POST">
+                <button class="dashboard-button"><i class="fas fa-cloud-upload-alt"></i> Sync Now</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+
+
+   
+

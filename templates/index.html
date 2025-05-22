@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OSCloudSync Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #eef1f4;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background: #007bff;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+        .container {
+            padding: 20px;
+        }
+        .logs, .errors {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+        }
+        .button {
+            background-color: #007bff;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px 0;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .status {
+            font-weight: bold;
+            color: green;
+        }
+        .status.off {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>OSCloudSync Dashboard</h1>
+    </header>
+    <div class="container">
+        <p>Sync Status: 
+            <span class="status {{ 'off' if not running else '' }}">
+                {{ 'Running' if running else 'Stopped' }}
+            </span>
+        </p>
+        <form action="/toggle-sync" method="POST">
+            <button class="button" type="submit">
+                {{ 'Stop Syncing' if running else 'Start Syncing' }}
+            </button>
+        </form>
+        <form action="/logout" method="GET">
+            <button class="button" style="background-color: gray;">Logout</button>
+        </form>
+
+        <h3>Recent Sync Logs</h3>
+        <div class="logs">
+            {% for log in logs %}
+                <p>{{ log.time }} - {{ log.file }} - {{ log.status }}</p>
+            {% else %}
+                <p>No logs yet.</p>
+            {% endfor %}
+        </div>
+
+        <h3>Errors</h3>
+        <div class="errors">
+            {% for err in errors %}
+                <p>{{ err.time }} - {{ err.file }} - {{ err.error }}</p>
+            {% else %}
+                <p>No errors.</p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>
