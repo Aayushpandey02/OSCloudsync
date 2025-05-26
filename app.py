@@ -1,136 +1,176 @@
-from flask import Flask, render_template, request, redirect, url_for, session
-import threading, time, os, logging, psutil, webbrowser
+import os
+import time
+from threading import Thread, Lock
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from datetime import datetime
-from cleanup import cleanup_old_files
+from supabase_sync import upload_file_to_supabase, delete_file_from_supabase
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.config['SECRET_KEY'] = 'your-secret-key-here'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
-USERNAME = "admin"
-PASSWORD = "admin123"
+log_lock = Lock()
+logs = []
+stats = {"synced": 0, "deleted": 0, "errors": 0, "last_sync": "Never"}
+watching = False
+observer = None
 
-sync_running = True
-sync_logs = []
-sync_errors = []
-
-# Directories
+# === Configuration ===
 WATCH_FOLDER = 'watch_folder'
-logs_folder = 'logs'
+BUCKET_NAME = 'user-files'
+DEST_FOLDER = 'synced'
 
-# Ensure folders exist
 os.makedirs(WATCH_FOLDER, exist_ok=True)
-os.makedirs(logs_folder, exist_ok=True)
 
-# Logging setup
-logging.basicConfig(filename=os.path.join(logs_folder, 'sync.log'), level=logging.INFO)
-
-def is_cpu_busy(threshold=70):
-    return psutil.cpu_percent(interval=1) > threshold
-
-def upload_file(file_path):
-    try:
-        if is_cpu_busy():
-            log_entry = {'file': file_path, 'status': 'Skipped - CPU busy', 'time': timestamp()}
-            sync_logs.append(log_entry)
-            logging.info(f"{log_entry}")
-            return
-        time.sleep(1)  # Simulate upload
-        log_entry = {'file': file_path, 'status': 'Uploaded', 'time': timestamp()}
-        sync_logs.append(log_entry)
-        logging.info(f"{log_entry}")
-    except Exception as e:
-        err_entry = {'file': file_path, 'error': str(e), 'time': timestamp()}
-        sync_errors.append(err_entry)
-        logging.error(f"{err_entry}")
-
-def timestamp():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-class BackupHandler(FileSystemEventHandler):
-    def on_modified(self, event):
-        if event.is_directory or not sync_running:
-            return
-        upload_file(event.src_path)
-
+# === File System Event Handler ===
+class SupabaseSyncHandler(FileSystemEventHandler):
     def on_created(self, event):
-        if event.is_directory or not sync_running:
-            return
-        upload_file(event.src_path)
-
+        if not event.is_directory:
+            print(f"File created: {event.src_path}")
+            # Add small delay to ensure file is fully written
+            time.sleep(0.1)
+            self._sync_file(event.src_path)
+    
+    def on_modified(self, event):
+        if not event.is_directory:
+            print(f"File modified: {event.src_path}")
+            # Add small delay to ensure file is fully written
+            time.sleep(0.1)
+            self._sync_file(event.src_path)
+    
     def on_deleted(self, event):
-        log_entry = {'file': event.src_path, 'status': 'Deleted', 'time': timestamp()}
-        sync_logs.append(log_entry)
-        logging.info(f"{log_entry}")
+        if not event.is_directory:
+            print(f"File deleted: {event.src_path}")
+            relative_path = os.path.relpath(event.src_path, WATCH_FOLDER)
+            supabase_path = f"{DEST_FOLDER}/{relative_path}"
+            try:
+                delete_file_from_supabase(BUCKET_NAME, supabase_path)
+                log_event(f"Deleted from Supabase: {supabase_path}", "deleted")
+                stats["deleted"] += 1
+                update_stats()
+            except Exception as e:
+                log_event(f"Error deleting {supabase_path}: {str(e)}", "error")
+                stats["errors"] += 1
+                update_stats()
+    
+    def _sync_file(self, filepath):
+        try:
+            # Check if file still exists (in case of quick delete)
+            if not os.path.exists(filepath):
+                return
+                
+            relative_path = os.path.relpath(filepath, WATCH_FOLDER)
+            supabase_path = f"{DEST_FOLDER}/{relative_path}"
+            
+            print(f"Syncing file: {filepath} -> {supabase_path}")
+            upload_file_to_supabase(BUCKET_NAME, filepath, supabase_path)
+            log_event(f"Uploaded to Supabase: {supabase_path}", "synced")
+            stats["synced"] += 1
+            stats["last_sync"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            update_stats()
+        except Exception as e:
+            log_event(f"Error uploading {filepath}: {str(e)}", "error")
+            stats["errors"] += 1
+            update_stats()
 
-    def on_moved(self, event):
-        log_entry = {'file': event.dest_path, 'status': 'Moved', 'time': timestamp()}
-        sync_logs.append(log_entry)
-        logging.info(f"{log_entry}")
+# === Logging and Stats ===
+def log_event(message, status):
+    print(f"[{status.upper()}] {message}")  # Console logging for debugging
+    with log_lock:
+        log_entry = {
+            "message": message,
+            "status": status,
+            "timestamp": time.strftime("%H:%M:%S")
+        }
+        logs.insert(0, log_entry)
+        if len(logs) > 100:
+            logs.pop()
+        
+        # Emit to all connected clients
+        socketio.emit("log_update", log_entry)
 
-def start_monitor():
-    observer = Observer()
-    observer.schedule(BackupHandler(), path=WATCH_FOLDER, recursive=True)
-    observer.start()
-    try:
-        while True:
-            time.sleep(5)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+def update_stats():
+    print(f"Stats updated: {stats}")  # Console logging for debugging
+    # Emit to all connected clients
+    socketio.emit("stats_update", stats)
 
+# === Flask Routes ===
 @app.route('/')
-def home():
-    if not session.get('logged_in'):
-        return redirect(url_for('login'))
-    return render_template('index.html', logs=sync_logs, running=sync_running, errors=sync_errors)
+def index():
+    return render_template('index.html')
 
-@app.route('/toggle-sync', methods=['POST'])
-def toggle_sync():
-    global sync_running
-    sync_running = not sync_running
-    return redirect(url_for('home'))
+# === WebSocket Events ===
+@socketio.on('connect')
+def handle_connect():
+    print(f"Client connected: {request.sid}")
+    # Send current stats and recent logs to newly connected client
+    emit('stats_update', stats)
+    with log_lock:
+        for log_entry in reversed(logs[-10:]):  # Send last 10 logs
+            emit('log_update', log_entry)
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        if request.form['username'] == USERNAME and request.form['password'] == PASSWORD:
-            session['logged_in'] = True
-            return redirect(url_for('home'))
-        else:
-            return render_template('login.html', error='Invalid credentials.')
-    return render_template('login.html')
+@socketio.on('disconnect')
+def handle_disconnect():
+    print(f"Client disconnected: {request.sid}")
 
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect(url_for('login'))
+@socketio.on('start_watch')
+def start_watching():
+    global watching, observer
+    print("Received start_watch event")
+    
+    if not watching:
+        try:
+            event_handler = SupabaseSyncHandler()
+            observer = Observer()
+            observer.schedule(event_handler, path=WATCH_FOLDER, recursive=True)
+            observer.start()
+            watching = True
+            log_event(f"Started watching folder: {WATCH_FOLDER}", "info")
+            print("Observer started successfully")
+        except Exception as e:
+            log_event(f"Error starting watcher: {str(e)}", "error")
+            stats["errors"] += 1
+            update_stats()
+    else:
+        log_event("Already watching files", "info")
 
-@app.route('/test-upload', methods=['POST'])
-def test_upload():
-    dummy_file = os.path.join(WATCH_FOLDER, 'test_sync.txt')
-    with open(dummy_file, 'w') as f:
-        f.write('Test content')
-    return "Test file created."
+@socketio.on('stop_watch')
+def stop_watching():
+    global watching, observer
+    print("Received stop_watch event")
+    
+    if watching and observer:
+        try:
+            observer.stop()
+            observer.join()
+            observer = None
+            watching = False
+            log_event("Stopped watching files", "info")
+            print("Observer stopped successfully")
+        except Exception as e:
+            log_event(f"Error stopping watcher: {str(e)}", "error")
+            stats["errors"] += 1
+            update_stats()
+    else:
+        log_event("Not currently watching", "info")
 
-def auto_cleanup_runner():
-    while True:
-        print("🧹 Running automatic cleanup...")
-        cleanup_old_files(WATCH_FOLDER, 20)  # Cleanup files older than 20 days
-        time.sleep(86400)  # Run once per day
+@socketio.on('clear_logs')
+def clear_logs():
+    print("Received clear_logs event")
+    with log_lock:
+        logs.clear()
+        socketio.emit("logs_cleared")
+    log_event("Logs cleared", "info")
 
-def print_login_url():
-    time.sleep(1)  # Allow Flask to start
-    url = "http://127.0.0.1:5000/login"
-    print(f"\n🚀 Flask app is live!\n🔗 Login here: {url}\n")
-    webbrowser.open(url)
-
-# Start background tasks
-cleanup_thread = threading.Thread(target=auto_cleanup_runner, daemon=True)
-cleanup_thread.start()
-
+# === Entry Point ===
 if __name__ == '__main__':
-    threading.Thread(target=start_monitor, daemon=True).start()
-    threading.Thread(target=print_login_url, daemon=True).start()
-    app.run(debug=True, port=5000)
+    print(f"Starting Supabase Sync Monitor...")
+    print(f"Watch folder: {os.path.abspath(WATCH_FOLDER)}")
+    print(f"Access the dashboard at: http://localhost:5000")
+    
+    # Import request for socketio events
+    from flask import request
+    
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
