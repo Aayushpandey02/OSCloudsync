@@ -13,14 +13,21 @@ A real-time file sync monitor using **Flask**, **Socket.IO**, and **Watchdog** t
 
 ## 📂 Project Structure
    OSCloudSync/
-   ├── app.py # Main Flask application
-   ├── app_utils.py # Logging and stats utilities
-   ├── queued_processor.py # Job queue for file sync tasks
-   ├── templates/
-   │ └── index.html # Dashboard UI
-   ├── watch_folder/ # Folder to be watched (auto-created)
-   ├── requirements.txt # Python dependencies
-   └── README.md # This file
+   app.py # Main Flask application
+   
+   app_utils.py # Logging and stats utilities
+   
+   queued_processor.py # Job queue for file sync tasks
+   
+   templates/
+   
+       index.html # Dashboard UI
+       
+   watch_folder/ # Folder to be watched (auto-created)
+   
+   requirements.txt # Python dependencies
+   
+   README.md 
   
 
 ## 🧠 How It Works
