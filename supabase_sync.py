@@ -6,8 +6,8 @@ from supabase.lib.client_options import ClientOptions
 # Load environment variables from .env
 load_dotenv()
 
-SUPABASE_URL = "https://bsypgbmogjznwrdypgts.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzeXBnYm1vZ2p6bndyZHlwZ3RzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgyNzc5NDMsImV4cCI6MjA2Mzg1Mzk0M30.sBrIRtujn-qzgDVK-KtfIZ4da0CUF7upupD0khy5UcE"
+SUPABASE_URL = "YOUR_SUPABASE_URL"
+SUPABASE_KEY = "YOUR_SUPABASE_ANON_KEY"
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise Exception("Missing SUPABASE_URL or SUPABASE_KEY. Did you forget to create or configure the .env file?")
